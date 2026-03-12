@@ -1,13 +1,9 @@
-Notes from Ravi
-
+Notes from Ravi: 
+Phase-1:
 multile cameras to one object detection 
 multiple sensor to one object detection 
-
-
 multi camera - guasssion splatting --> lidar and other sensors 
-
-sensor fusion thing
-
+sensor fusion thing 
 
 ----------------------------------------------------------
 About Data 
