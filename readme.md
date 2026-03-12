@@ -1,7 +1,3 @@
-Below is a **clean, professional `README.md`** you can paste directly into your GitHub repo.
-It is structured like a **real ML / autonomous driving project README** and incorporates your **notes, dataset structure, and technical table**.
-
----
 
 # Qualcomm PoC — Autonomous Driving Annotation Pipeline
 
