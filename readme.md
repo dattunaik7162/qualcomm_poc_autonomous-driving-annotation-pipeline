@@ -418,3 +418,25 @@ Example installation:
 
 ```bash
 pip install physical_ai_av
+
+
+## USED DATA FOR THIS POC 
+calibration/
+    camera_intrinsics.chunk_0000.parquet
+    sensor_extrinsics.chunk_0000.parquet
+    vehicle_dimensions.chunk_0000.parquet
+
+camera/
+    camera_front_wide_120fov.chunk_0000.zip
+    camera_cross_left_120fov.chunk_0000.zip
+    camera_cross_right_120fov.chunk_0000.zip
+
+lidar/
+    lidar_top_360fov.chunk_0000.zip
+
+labels/
+    egomotion.chunk_0000.zip
+
+metadata/
+    data_collection.parquet
+    sensor_presence.parquet
