@@ -170,11 +170,3 @@ You can **directly paste this into a README / documentation**.
 | Annotation Usage       | LiDAR Point Cloud                  | 3D data                  | spatial geometry      | object localization                 | 3D bounding boxes                           |
 | Annotation Usage       | Radar Data                         | radar detection          | velocity sensing      | moving objects                      | object tracking                             |
 | Annotation Usage       | Multi Sensor                       | fused data               | sensor fusion         | perception stack                    | ADAS model training                         |
-
----
-
-If you want, I can also create a **second table that is extremely useful for your PoC**:
-
-**"Dataset → Annotation Task Mapping Table"**
-
-This clearly shows **which dataset fields are required for each annotation task (bounding box, segmentation, lane detection, traffic signs)** — which makes your **README look very professional for ML/ADAS projects.**
