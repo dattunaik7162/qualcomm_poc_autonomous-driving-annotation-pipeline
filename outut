@@ -1,0 +1,197 @@
+outputs
+    camera_detections
+        cross_left
+        cross_right
+        front_wide
+        Notes :these are having white bounding boxes with real label and score
+    detection_json
+        cross_left
+        cross_right
+        front_wide
+        example : 
+            {
+                "camera": "cross_left",
+                "frame_index": 1,
+                "detections": [
+                    {
+                        "frame_index": 1,
+                        "camera": "cross_left",
+                        "class_id": 2,
+                        "class_name": "car",
+                        "confidence": 0.811,
+                        "bbox": [
+                            0,
+                            306,
+                            1333,
+                            985
+                        ]
+                    }
+                ]
+            }
+    frames
+        cross_left
+        cross_right
+        front_wide   
+    fused_detections
+        one file like
+                    {
+                "frame_index": 1,
+                "objects": [
+                    {
+                        "object_id": "989899f9",
+                        "class": "car",
+                        "confidence": 0.547,
+                        "bbox_2d": [
+                            677,
+                            493,
+                            931,
+                            605
+                        ],
+                        "bbox_center": [
+                            804.0,
+                            549.0
+                        ],
+                        "camera_votes": 1,
+                        "source_cameras": [
+                            "front_wide"
+                        ]
+                    },
+                    {
+                        "object_id": "c542d934",
+                        "class": "bike",
+                        "confidence": 0.524,
+                        "bbox_2d": [
+                            658,
+                            587,
+                            807,
+                            663
+                        ],
+                        "bbox_center": [
+                            732.5,
+                            625.0
+                        ],
+                        "camera_votes": 1,
+                        "source_cameras": [
+                            "front_wide"
+                        ]
+                    },
+                    {
+                        "object_id": "9a33c194",
+                        "class": "car",
+                        "confidence": 0.401,
+                        "bbox_2d": [
+                            1226,
+                            525,
+                            1369,
+                            587
+                        ],
+                        "bbox_center": [
+                            1297.5,
+                            556.0
+                        ],
+                        "camera_votes": 1,
+                        "source_cameras": [
+                            "front_wide"
+                        ]
+                    },
+                    {
+                        "object_id": "6d8e3b5c",
+                        "class": "car",
+                        "confidence": 0.807,
+                        "bbox_2d": [
+                            121,
+                            524,
+                            279,
+                            587
+                        ],
+                        "bbox_center": [
+                            200.0,
+                            555.5
+                        ],
+                        "camera_votes": 1,
+                        "source_cameras": [
+                            "cross_right"
+                        ]
+                    }
+                ]
+            }
+    lidar_annotations
+        one file be like 
+            {
+                    "frame_index": 0,
+                    "objects": [
+                        {
+                            "object_id": "9a33c194",
+                            "class": "car",
+                            "confidence": 0.653,
+                            "bbox_2d": [
+                                1233,
+                                526,
+                                1372,
+                                587
+                            ],
+                            "camera_votes": 1,
+                            "source_cameras": [
+                                "front_wide"
+                            ],
+                            "distance_meters": 4.39,
+                            "bbox_3d": {
+                                "center": [
+                                    1.2015564047016236,
+                                    0.08310932430706647,
+                                    4.216668439091937
+                                ],
+                                "dimensions": [
+                                    0.44568962683923186,
+                                    0.5054109754646183,
+                                    1.3516531745216187
+                                ]
+                            },
+                            "num_lidar_points": 349
+                        }
+                    ]
+                }
+    lidar_object_points
+            {
+    "frame_index": 1,
+    "objects": [
+        {
+            "object_id": "9a33c194",
+            "class": "car",
+            "confidence": 0.401,
+            "bbox_2d": [
+                1226,
+                525,
+                1369,
+                587
+            ],
+            "bbox_center": [
+                1297.5,
+                556.0
+            ],
+            "camera_votes": 1,
+            "source_cameras": [
+                "front_wide"
+            ],
+            "lidar_point_count": 735,
+            "points_3d": [
+                [
+                    1.0413861839032725,
+                    0.044254318525689985,
+                    3.5899318448994055
+                ],
+                [
+                    1.307120051282648,
+                    -0.07497816593455117,
+                    3.738943224040941
+                ],
+                [
+                    1.04118225806629,
+                    0.03157611178808544,
+                    3.589859386057089
+                ],
+                [
+                    1.042289681748473,
+                    0.10770442477056028,
+                    3.5776147456362257
+                ], and so on...

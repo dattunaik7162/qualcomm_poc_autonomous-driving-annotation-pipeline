@@ -1,6 +1,5 @@
 import json
 import numpy as np
-import cv2
 import pyarrow.parquet as pq
 import DracoPy
 from scipy.spatial.transform import Rotation as R
@@ -8,18 +7,23 @@ import os
 
 CLIP_ID = "0a948f59-0a06-41a2-8e20-ac3a39ff4d61"
 
-IMAGE_PATH = "outputs/frames/front_wide/frame_000.jpg"
-DETECTION_FILE = "outputs/detection_json/front_wide/frame_000.json"
+FUSED_DETECTIONS_DIR = "outputs/fused_detections"
+OUTPUT_DIR = "outputs/lidar_object_points"
 
 LIDAR_FILE = f"data_source/lidar/lidar_top_360fov.chunk_0000/{CLIP_ID}.lidar_top_360fov.parquet"
 
 INTRINSICS_FILE = "data_source/calibration/camera_intrinsics.chunk_0000.parquet"
 EXTRINSICS_FILE = "data_source/calibration/sensor_extrinsics.chunk_0000.parquet"
 
+FRAME_COUNT = 50
+BBOX_MARGIN = 20
+MIN_LIDAR_POINTS = 3
+
 
 # -------------------------
-# Load intrinsics
+# Camera intrinsics
 # -------------------------
+
 def load_intrinsics():
 
     table = pq.read_table(INTRINSICS_FILE)
@@ -36,8 +40,9 @@ def load_intrinsics():
 
 
 # -------------------------
-# Load extrinsics
+# Sensor extrinsics
 # -------------------------
+
 def load_extrinsics():
 
     table = pq.read_table(EXTRINSICS_FILE)
@@ -60,15 +65,19 @@ def load_extrinsics():
 # -------------------------
 # Transform LiDAR → Camera
 # -------------------------
+
 def transform_lidar(points, translation, rotation):
 
     rotated = rotation.apply(points)
-    return rotated + translation
+    transformed = rotated + translation
+
+    return transformed
 
 
 # -------------------------
 # Projection
 # -------------------------
+
 def project(points, fx, fy, cx, cy):
 
     x = points[:,0]
@@ -84,67 +93,12 @@ def project(points, fx, fy, cx, cy):
 
 
 # -------------------------
-# Parse bbox safely
+# Load LiDAR
 # -------------------------
-def parse_bbox(det):
 
-    if "bbox" in det:
-        bbox = det["bbox"]
+def load_lidar():
 
-    elif "box" in det:
-        bbox = det["box"]
-
-    elif "xyxy" in det:
-        bbox = det["xyxy"]
-
-    else:
-        return None
-
-    if len(bbox) != 4:
-        return None
-
-    try:
-        x1, y1, x2, y2 = map(int, bbox)
-        return x1, y1, x2, y2
-    except:
-        return None
-
-
-# -------------------------
-# Main
-# -------------------------
-def main():
-
-    if not os.path.exists(IMAGE_PATH):
-        print("Image not found")
-        return
-
-    img = cv2.imread(IMAGE_PATH)
-
-    if img is None:
-        print("Failed to load image")
-        return
-
-
-    # ---------------------
-    # Load detections
-    # ---------------------
-
-    if not os.path.exists(DETECTION_FILE):
-        print("Detection file not found")
-        return
-
-    with open(DETECTION_FILE) as f:
-        detections = json.load(f)
-
-    if len(detections) == 0:
-        print("No detections found")
-        return
-
-
-    # ---------------------
-    # Load LiDAR
-    # ---------------------
+    print("Loading LiDAR scan...")
 
     table = pq.read_table(LIDAR_FILE)
     df = table.to_pandas()
@@ -154,18 +108,91 @@ def main():
 
     print("Total LiDAR points:", lidar_points.shape)
 
+    return lidar_points
 
-    # ---------------------
-    # Calibration
-    # ---------------------
+
+# -------------------------
+# Process single frame
+# -------------------------
+
+def process_frame(frame_index, pixels, camera_points):
+
+    detection_file = f"{FUSED_DETECTIONS_DIR}/frame_{frame_index:03d}.json"
+
+    if not os.path.exists(detection_file):
+        print(f"Frame {frame_index:03d} detection file missing")
+        return
+
+    with open(detection_file) as f:
+        data = json.load(f)
+
+    objects = data.get("objects", [])
+
+    frame_output = []
+
+    for obj in objects:
+
+        x1, y1, x2, y2 = obj["bbox_2d"]
+
+        mask = (
+            (pixels[:,0] >= x1 - BBOX_MARGIN) &
+            (pixels[:,0] <= x2 + BBOX_MARGIN) &
+            (pixels[:,1] >= y1 - BBOX_MARGIN) &
+            (pixels[:,1] <= y2 + BBOX_MARGIN)
+        )
+
+        lidar_pts = camera_points[mask]
+
+        print(
+            f"Frame {frame_index:03d} | Object {obj['class']} | LiDAR points:",
+            lidar_pts.shape[0]
+        )
+
+        if lidar_pts.shape[0] < MIN_LIDAR_POINTS:
+            continue
+
+        frame_output.append({
+
+            "object_id": obj["object_id"],
+            "class": obj["class"],
+            "confidence": obj["confidence"],
+
+            "bbox_2d": obj["bbox_2d"],
+            "bbox_center": obj["bbox_center"],
+
+            "camera_votes": obj["camera_votes"],
+            "source_cameras": obj["source_cameras"],
+
+            "lidar_point_count": int(lidar_pts.shape[0]),
+
+            "points_3d": lidar_pts.tolist()
+
+        })
+
+    output_file = f"{OUTPUT_DIR}/frame_{frame_index:03d}.json"
+
+    with open(output_file, "w") as f:
+
+        json.dump({
+            "frame_index": frame_index,
+            "objects": frame_output
+        }, f, indent=4)
+
+    print(f"Frame {frame_index:03d} → {len(frame_output)} lidar objects")
+
+
+# -------------------------
+# Main pipeline
+# -------------------------
+
+def main():
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    lidar_points = load_lidar()
 
     fx, fy, cx, cy = load_intrinsics()
     translation, rotation = load_extrinsics()
-
-
-    # ---------------------
-    # Transform + project
-    # ---------------------
 
     camera_points = transform_lidar(lidar_points, translation, rotation)
 
@@ -173,52 +200,13 @@ def main():
 
     pixels = project(camera_points, fx, fy, cx, cy)
 
-    pixels_int = pixels.astype(int)
-
     print("Projected points:", pixels.shape)
 
+    for frame in range(FRAME_COUNT):
 
-    # ---------------------
-    # Process detections
-    # ---------------------
+        process_frame(frame, pixels, camera_points)
 
-    for det in detections:
-
-        bbox = parse_bbox(det)
-
-        if bbox is None:
-            continue
-
-        x1, y1, x2, y2 = bbox
-
-        cv2.rectangle(img,(x1,y1),(x2,y2),(0,255,0),2)
-
-
-        # Vectorized filtering
-        mask = (
-            (pixels_int[:,0] >= x1) &
-            (pixels_int[:,0] <= x2) &
-            (pixels_int[:,1] >= y1) &
-            (pixels_int[:,1] <= y2)
-        )
-
-        object_points = pixels_int[mask]
-
-        print("Points inside bbox:", len(object_points))
-
-
-        # Draw lidar points
-        for p in object_points:
-
-            x, y = p
-
-            if 0 <= x < img.shape[1] and 0 <= y < img.shape[0]:
-                cv2.circle(img,(x,y),4,(0,0,255),-1)
-
-
-    cv2.imshow("LiDAR Points in Object",img)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    print("\nLiDAR object extraction completed")
 
 
 if __name__ == "__main__":

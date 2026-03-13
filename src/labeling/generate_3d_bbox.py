@@ -1,311 +1,250 @@
 import json
 import numpy as np
-import cv2
-import pyarrow.parquet as pq
-import DracoPy
-from scipy.spatial.transform import Rotation as R
 from sklearn.cluster import DBSCAN
 import os
+import plotly.graph_objects as go
 
-CLIP_ID = "0a948f59-0a06-41a2-8e20-ac3a39ff4d61"
+FRAME_COUNT = 50
 
-IMAGE_PATH = "outputs/frames/front_wide/frame_000.jpg"
-DETECTION_FILE = "outputs/detection_json/front_wide/frame_000.json"
+LIDAR_POINTS_DIR = "outputs/lidar_object_points"
+OUTPUT_DIR = "outputs/lidar_annotations"
 
-LIDAR_FILE = f"data_source/lidar/lidar_top_360fov.chunk_0000/{CLIP_ID}.lidar_top_360fov.parquet"
-
-INTRINSICS_FILE = "data_source/calibration/camera_intrinsics.chunk_0000.parquet"
-EXTRINSICS_FILE = "data_source/calibration/sensor_extrinsics.chunk_0000.parquet"
+VISUALIZE = False
 
 
 # ------------------------------------------------
-# Load Camera Intrinsics
+# Clean and validate LiDAR points
 # ------------------------------------------------
-def load_intrinsics():
+def clean_points(points):
 
-    table = pq.read_table(INTRINSICS_FILE)
-    df = table.to_pandas().reset_index()
+    if len(points) == 0:
+        return np.empty((0,3))
 
-    row = df[df["camera_name"] == "camera_front_wide_120fov"].iloc[0]
+    pts = np.array(points)
 
-    fx = row["fw_poly_1"]
-    fy = row["fw_poly_1"]
-    cx = row["cx"]
-    cy = row["cy"]
+    if pts.ndim != 2 or pts.shape[1] != 3:
+        return np.empty((0,3))
 
-    return fx, fy, cx, cy
+    pts = pts[np.isfinite(pts).all(axis=1)]
 
-
-# ------------------------------------------------
-# Load Sensor Extrinsics
-# ------------------------------------------------
-def load_extrinsics():
-
-    table = pq.read_table(EXTRINSICS_FILE)
-    df = table.to_pandas().reset_index()
-
-    row = df[df["sensor_name"] == "camera_front_wide_120fov"].iloc[0]
-
-    translation = np.array([row["x"], row["y"], row["z"]])
-
-    rotation = R.from_quat([
-        row["qx"],
-        row["qy"],
-        row["qz"],
-        row["qw"]
-    ])
-
-    return translation, rotation
+    return pts
 
 
 # ------------------------------------------------
-# Transform LiDAR → Camera frame
+# Cluster LiDAR points
 # ------------------------------------------------
-def transform(points, translation, rotation):
+def cluster_points(points):
 
-    rotated = rotation.apply(points)
-
-    return rotated + translation
-
-
-# ------------------------------------------------
-# Project 3D → 2D
-# ------------------------------------------------
-def project(points, fx, fy, cx, cy):
-
-    x = points[:,0]
-    y = points[:,1]
-    z = points[:,2]
-
-    z[z == 0] = 1e-6
-
-    u = fx * (x/z) + cx
-    v = fy * (y/z) + cy
-
-    return np.stack((u,v), axis=1)
-
-
-# ------------------------------------------------
-# Parse bbox safely
-# ------------------------------------------------
-def parse_bbox(det):
-
-    if "bbox" in det:
-        bbox = det["bbox"]
-
-    elif "box" in det:
-        bbox = det["box"]
-
-    elif "xyxy" in det:
-        bbox = det["xyxy"]
-
-    else:
-        return None
-
-    if len(bbox) != 4:
-        return None
+    if len(points) < 10:
+        return []
 
     try:
-        x1,y1,x2,y2 = map(int,bbox)
-        return x1,y1,x2,y2
+        clustering = DBSCAN(eps=1.2, min_samples=8).fit(points)
     except:
-        return None
+        return []
+
+    labels = clustering.labels_
+
+    clusters = []
+
+    for cid in set(labels):
+
+        if cid == -1:
+            continue
+
+        cluster = points[labels == cid]
+
+        if len(cluster) < 10:
+            continue
+
+        clusters.append(cluster)
+
+    return clusters
 
 
 # ------------------------------------------------
-# Main Pipeline
+# Compute 3D bounding box
 # ------------------------------------------------
-def main():
+def compute_bbox(cluster):
 
-    if not os.path.exists(IMAGE_PATH):
-        print("Image missing")
+    xmin, ymin, zmin = cluster.min(axis=0)
+    xmax, ymax, zmax = cluster.max(axis=0)
+
+    center = [
+        float((xmin + xmax) / 2),
+        float((ymin + ymax) / 2),
+        float((zmin + zmax) / 2)
+    ]
+
+    dimensions = [
+        float(xmax - xmin),
+        float(ymax - ymin),
+        float(zmax - zmin)
+    ]
+
+    return center, dimensions
+
+
+# ------------------------------------------------
+# Plotly visualization (optional)
+# ------------------------------------------------
+def visualize(points, annotations):
+
+    fig = go.Figure()
+
+    pts = points[::30]
+
+    fig.add_trace(go.Scatter3d(
+        x=pts[:,0],
+        y=pts[:,1],
+        z=pts[:,2],
+        mode='markers',
+        marker=dict(size=2,color='gray'),
+        name="LiDAR"
+    ))
+
+    for obj in annotations:
+
+        c = obj["bbox_3d"]["center"]
+
+        label = f'{obj["class"]} ({obj["confidence"]:.2f}) {obj["distance_meters"]}m'
+
+        fig.add_trace(go.Scatter3d(
+            x=[c[0]],
+            y=[c[1]],
+            z=[c[2]],
+            mode='markers+text',
+            marker=dict(size=8,color='red'),
+            text=[label],
+            name=obj["class"]
+        ))
+
+    fig.update_layout(
+        title="3D LiDAR Detection",
+        scene=dict(
+            xaxis_title="X",
+            yaxis_title="Y",
+            zaxis_title="Z"
+        )
+    )
+
+    fig.show()
+
+
+# ------------------------------------------------
+# Process each frame
+# ------------------------------------------------
+def process_frame(frame_index):
+
+    file = f"{LIDAR_POINTS_DIR}/frame_{frame_index:03d}.json"
+
+    if not os.path.exists(file):
+        print(f"Frame {frame_index:03d} skipped (no lidar file)")
         return
 
-    img = cv2.imread(IMAGE_PATH)
-
-    if img is None:
-        print("Failed to load image")
+    try:
+        with open(file) as f:
+            data = json.load(f)
+    except:
+        print(f"Frame {frame_index:03d} invalid JSON")
         return
 
+    objects = data.get("objects", [])
 
-    if not os.path.exists(DETECTION_FILE):
-        print("Detection JSON missing")
+    if len(objects) == 0:
+        print(f"Frame {frame_index:03d} no objects")
         return
-
-    with open(DETECTION_FILE) as f:
-        detections = json.load(f)
-
-    if len(detections) == 0:
-        print("No detections")
-        return
-
-
-    # ----------------------------
-    # Load LiDAR
-    # ----------------------------
-
-    table = pq.read_table(LIDAR_FILE)
-    df = table.to_pandas()
-
-    decoded = DracoPy.decode(df.iloc[0]["draco_encoded_pointcloud"])
-
-    lidar_points = np.array(decoded.points)
-
-    print("Total LiDAR points:", lidar_points.shape)
-
-
-    # ----------------------------
-    # Calibration
-    # ----------------------------
-
-    fx, fy, cx, cy = load_intrinsics()
-    translation, rotation = load_extrinsics()
-
-
-    # ----------------------------
-    # Transform + Project
-    # ----------------------------
-
-    camera_points = transform(lidar_points, translation, rotation)
-
-    camera_points = camera_points[camera_points[:,2] > 0]
-
-    pixels = project(camera_points, fx, fy, cx, cy)
-
-    pixels_int = pixels.astype(int)
-
-    print("Projected points:", pixels.shape)
-
 
     annotations = []
 
+    for obj in objects:
 
-    # ----------------------------
-    # Process detections
-    # ----------------------------
+        points = clean_points(obj.get("points_3d", []))
 
-    for det in detections:
-
-        bbox = parse_bbox(det)
-
-        if bbox is None:
+        if len(points) < 10:
             continue
 
-        x1,y1,x2,y2 = bbox
+        clusters = cluster_points(points)
 
-        cv2.rectangle(img,(x1,y1),(x2,y2),(0,255,0),2)
-
-
-        # filter lidar points inside bbox
-        mask = (
-            (pixels_int[:,0] >= x1) &
-            (pixels_int[:,0] <= x2) &
-            (pixels_int[:,1] >= y1) &
-            (pixels_int[:,1] <= y2)
-        )
-
-        object_points = camera_points[mask]
-
-        print("Points inside bbox:",len(object_points))
-
-        if len(object_points) < 10:
+        if len(clusters) == 0:
             continue
 
+        # choose largest cluster
+        largest_cluster = max(clusters, key=len)
 
-        # ----------------------------
-        # Cluster LiDAR points
-        # ----------------------------
+        center, dims = compute_bbox(largest_cluster)
 
-        clustering = DBSCAN(eps=1.5, min_samples=8).fit(object_points)
+        # distance from ego vehicle
+        distance = float(np.linalg.norm(center))
 
-        labels = clustering.labels_
+        annotation = {
 
-        clusters = set(labels)
+            "object_id": obj.get("object_id","unknown"),
 
+            "class": obj.get("class","object"),
 
-        for cluster_id in clusters:
+            "confidence": float(obj.get("confidence",0.0)),
 
-            if cluster_id == -1:
-                continue
+            "bbox_2d": obj.get("bbox_2d",[]),
 
-            cluster_points = object_points[labels == cluster_id]
+            "camera_votes": len(obj.get("source_cameras",[])),
 
+            "source_cameras": obj.get("source_cameras",[]),
 
-            xmin,ymin,zmin = cluster_points.min(axis=0)
-            xmax,ymax,zmax = cluster_points.max(axis=0)
+            "distance_meters": round(distance,2),
 
+            "bbox_3d": {
 
-            center = [
-                float((xmin+xmax)/2),
-                float((ymin+ymax)/2),
-                float((zmin+zmax)/2)
-            ]
+                "center": center,
+                "dimensions": dims
 
-            dimensions = [
-                float(xmax-xmin),
-                float(ymax-ymin),
-                float(zmax-zmin)
-            ]
+            },
 
+            "num_lidar_points": int(len(largest_cluster))
 
-            annotation = {
+        }
 
-                "class": det.get("class","object"),
+        annotations.append(annotation)
 
-                "confidence": float(det.get("confidence",1.0)),
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-                "bbox_2d": [x1,y1,x2,y2],
+    out_file = f"{OUTPUT_DIR}/frame_{frame_index:03d}.json"
 
-                "bbox_3d": {
-
-                    "center": center,
-
-                    "dimensions": dimensions
-                },
-
-                "num_lidar_points": int(len(cluster_points))
-            }
-
-            annotations.append(annotation)
-
-
-            # visualize center
-            pixel = project(np.array([center]),fx,fy,cx,cy)[0]
-
-            cx2,cy2 = int(pixel[0]),int(pixel[1])
-
-            if 0 <= cx2 < img.shape[1] and 0 <= cy2 < img.shape[0]:
-                cv2.circle(img,(cx2,cy2),8,(255,0,0),-1)
-
-
-    # ----------------------------
-    # Save annotations
-    # ----------------------------
-
-    os.makedirs("outputs/lidar_annotations", exist_ok=True)
-
-    label_file = "outputs/lidar_annotations/frame_000.json"
-
-    with open(label_file,"w") as f:
+    with open(out_file,"w") as f:
 
         json.dump({
 
-            "frame_id":"frame_000",
+            "frame_index": frame_index,
+            "objects": annotations
 
-            "objects":annotations
+        },f,indent=4)
 
-        },f,indent=2)
+    print(f"Frame {frame_index:03d} → {len(annotations)} 3D objects")
 
-    print("Annotation file saved:",label_file)
+    if VISUALIZE and len(annotations)>0:
+
+        all_pts = np.vstack([
+            clean_points(o["points_3d"])
+            for o in objects
+            if len(o.get("points_3d",[]))>0
+        ])
+
+        visualize(all_pts, annotations)
 
 
-    cv2.imshow("3D Bounding Box Detection",img)
+# ------------------------------------------------
+# Main
+# ------------------------------------------------
+def main():
 
-    cv2.waitKey(0)
+    print("Starting 3D bounding box generation")
 
-    cv2.destroyAllWindows()
+    for frame in range(FRAME_COUNT):
+
+        process_frame(frame)
+
+    print("\n3D Bounding box generation completed")
 
 
 if __name__ == "__main__":
-
     main()
