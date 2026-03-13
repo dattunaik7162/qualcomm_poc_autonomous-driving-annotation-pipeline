@@ -1,0 +1,90 @@
+video
+   ↓
+frame extraction ✓
+   ↓
+object detection (now)
+   ↓
+timestamp alignment
+   ↓
+lidar decoding
+   ↓
+lidar projection
+   ↓
+3D annotation generation
+
+Milestone 1 — Extract Frames From Camera Video
+    src/preprocessing/frame_extraction.py
+    - Extracted 50 frames from each folder (left, right, wide)
+    20 seconds and 30 FPS ≈600 frames
+    600 frames × 3 cameras = 1800 frames
+    For a PoC, we only need to prove the pipeline works. So we use: first 50 frames
+
+    Utility : We Need src/data_loader/clip_selector.py
+    Right now your folders contain 100+ clips per sensor.
+    But not all clips may exist in every sensor.We must find clips that exist in:
+        camera_front_wide
+        camera_cross_left
+        camera_cross_right
+        lidar_top_360
+        This script will automatically find those.
+        Dataset verified: camera + lidar synchronization ✓
+
+Milestone 2: Implementation of camera object detection.
+    required : pip install ultralytics opencv-python
+    src/detection/camera_object_detection.py
+    Output : 
+    outputs/
+        camera_detections/
+            front_wide/
+            cross_left/
+            cross_right/
+
+        detection_json/
+            front_wide/
+            cross_left/
+            cross_right/
+    
+    This JSON will be used later to:
+        project lidar points into camera
+        find points inside bbox
+        cluster points
+        generate 3D bounding boxes
+
+
+Milestone 3 — Timestamp Alignment
+    purpose : match camera frames with lidar scans
+    src/preprocessing/timestamp_alignment.py
+
+Milestone 4 — LiDAR decoding
+    The LiDAR file contains:
+        draco_encoded_pointcloud
+        We must decode it to obtain:(X, Y, Z) 3D points
+
+Milestone 5 — LiDAR → Camera Projection
+    src/projection/lidar_to_camera_projection.py
+    Goal:
+        3D lidar point
+        ↓
+        camera coordinate system
+            ↓
+        camera intrinsics
+            ↓
+        image pixel
+    Example:
+        LiDAR point (3.5m, -1.2m, 12.4m)
+         ↓
+        Pixel (742, 385)
+
+Milestone 6 — Extract LiDAR Points Inside YOLO Bounding Boxes
+    Use camera detections to identify which LiDAR points belong to an object.
+    src/labeling/extract_lidar_points_from_bbox.py
+
+Milestone- 7 —Generate 3D Bounding Boxes from LiDAR Points
+    We Generate 3D Bounding Boxes from LiDAR Points
+        YOLO detection
+            ↓
+        LiDAR points inside bbox
+            ↓
+        DBSCAN clustering
+            ↓
+        3D bounding box
